@@ -1,7 +1,3 @@
-// pacman_main.dart
-// Simple Pac-Man style game in Flutter (single-file).
-// Copy into a new Flutter project's lib/main.dart and run.
-
 import 'dart:async';
 import 'dart:math';
 
