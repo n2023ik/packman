@@ -1,0 +1,76 @@
+From: <Saved by Blink>
+Snapshot-Content-Location: https://packman-aj2d.vercel.app/
+Subject: Pac-Man (Flutter)
+Date: Sun, 28 Dec 2025 00:17:30 +0530
+MIME-Version: 1.0
+Content-Type: multipart/related;
+	type="text/html";
+	boundary="----MultipartBoundary--sUVQmsqchtdAHegWJpOsT02sgOaeEz2f7wze4EBZ2n----"
+
+
+------MultipartBoundary--sUVQmsqchtdAHegWJpOsT02sgOaeEz2f7wze4EBZ2n----
+Content-Type: text/html
+Content-ID: <frame-DD965B27B9865ED6DF1EF56E3860EB18@mhtml.blink>
+Content-Transfer-Encoding: binary
+Content-Location: https://packman-aj2d.vercel.app/
+
+<!DOCTYPE html><html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><link rel="stylesheet" type="text/css" href="cid:css-c237406b-ff3b-4c1b-8fd8-071f05c37f7e@mhtml.blink" />
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="https://packman-aj2d.vercel.app/">
+
+  
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="A new Flutter project.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="flutter_application_1">
+  <link rel="apple-touch-icon" href="https://packman-aj2d.vercel.app/icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="https://packman-aj2d.vercel.app/favicon.png">
+
+  <title>Pac-Man (Flutter)</title>
+  <link rel="manifest" href="https://packman-aj2d.vercel.app/manifest.json">
+<meta name="generator" content="Flutter"><meta flt-viewport="" name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"></head>
+<body flt-embedding="full-page" flt-renderer="canvaskit" flt-build-mode="release" spellcheck="false" style="position: fixed; inset: 0px; overflow: hidden; padding: 0px; margin: 0px; user-select: none; touch-action: none;">
+  
+
+
+<flt-announcement-host><flt-announcement-polite aria-live="polite" style="position: fixed; overflow: hidden; transform: translate(-99999px, -99999px); width: 1px; height: 1px;"></flt-announcement-polite><flt-announcement-assertive aria-live="assertive" style="position: fixed; overflow: hidden; transform: translate(-99999px, -99999px); width: 1px; height: 1px;"></flt-announcement-assertive></flt-announcement-host><flutter-view flt-view-id="0" tabindex="-1" style="position: absolute; inset: 0px; width: 600.939px; height: 928.451px;"><flt-glass-pane><template shadowmode="open"><flt-scene-host style="pointer-events: none;"><flt-canvas-container><canvas aria-hidden="true" width="800" height="1236" style="position: absolute; width: 600.939px; height: 928.451px;"></canvas></flt-canvas-container></flt-scene-host></template></flt-glass-pane><flt-text-editing-host></flt-text-editing-host><flt-semantics-host style="position: absolute; transform-origin: 0px 0px 0px; transform: scale(0.751174);"></flt-semantics-host></flutter-view></body></html>
+------MultipartBoundary--sUVQmsqchtdAHegWJpOsT02sgOaeEz2f7wze4EBZ2n----
+Content-Type: text/css
+Content-Transfer-Encoding: binary
+Content-Location: cid:css-c237406b-ff3b-4c1b-8fd8-071f05c37f7e@mhtml.blink
+
+@charset "utf-8";
+
+flutter-view flt-scene-host { font: 14px sans-serif; }
+
+flutter-view flt-semantics input[type="range"] { appearance: none; width: 100%; position: absolute; border: none; inset: 0px; }
+
+flutter-view input::selection { background-color: transparent; }
+
+flutter-view textarea::selection { background-color: transparent; }
+
+flutter-view flt-semantics input, flutter-view flt-semantics textarea, flutter-view flt-semantics [contenteditable="true"] { caret-color: transparent; }
+
+flutter-view .flt-text-editing::placeholder { opacity: 0; }
+
+flutter-view:focus { outline: none; }
+
+flutter-view .transparentTextEditing:-webkit-autofill, flutter-view .transparentTextEditing:-webkit-autofill:hover, flutter-view .transparentTextEditing:-webkit-autofill:focus, flutter-view .transparentTextEditing:-webkit-autofill:active { opacity: 0 !important; }
+------MultipartBoundary--sUVQmsqchtdAHegWJpOsT02sgOaeEz2f7wze4EBZ2n------
