@@ -2,21 +2,102 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-// Game constants for easier tweaking
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
 class GameColors {
-  static final wall = Colors.blue.shade800;
+  static final wall = Colors.blue.shade700;
+  static final wallFill = const Color(0xFF0A1560);
   static const background = Colors.black;
   static final pellet = Colors.yellow.shade200;
   static final pacman = Colors.yellow.shade600;
+  static final frightened = Colors.blue.shade600;
+  static final door = Colors.pink.shade200;
   static final ghosts = [
-    Colors.red.shade500,
-    Colors.pink.shade300,
-    Colors.cyan.shade300,
-    Colors.orange.shade500,
+    Colors.red.shade500, // Blinky – chases directly
+    Colors.pink.shade300, // Pinky  – ambushes ahead of Pac-Man
+    Colors.cyan.shade300, // Inky   – unpredictable flanker
+    Colors.orange.shade500, // Clyde  – chases, then gets shy
   ];
 }
+
+/// Tile codes used by the maze.
+class Tile {
+  static const pellet = 0;
+  static const wall = 1;
+  static const empty = 2;
+  static const house = 3; // ghost-house interior
+  static const door = 4; // ghost-house door
+  static const power = 5; // power pellet
+}
+
+enum Dir { up, down, left, right, none }
+
+enum GameLevel { easy, medium, hard }
+
+Point<int> dirVector(Dir d) {
+  switch (d) {
+    case Dir.up:
+      return const Point(0, -1);
+    case Dir.down:
+      return const Point(0, 1);
+    case Dir.left:
+      return const Point(-1, 0);
+    case Dir.right:
+      return const Point(1, 0);
+    case Dir.none:
+      return const Point(0, 0);
+  }
+}
+
+Dir oppositeOf(Dir d) {
+  switch (d) {
+    case Dir.up:
+      return Dir.down;
+    case Dir.down:
+      return Dir.up;
+    case Dir.left:
+      return Dir.right;
+    case Dir.right:
+      return Dir.left;
+    case Dir.none:
+      return Dir.none;
+  }
+}
+
+class Ghost {
+  Ghost({required this.color, required this.type, required this.home})
+      : pos = home,
+        prev = home;
+
+  final Color color;
+  final int type; // 0 Blinky, 1 Pinky, 2 Inky, 3 Clyde
+  final Point<int> home;
+
+  Point<int> pos;
+  Point<int> prev;
+  Dir dir = Dir.left;
+  bool eaten = false;
+  bool skip = false; // used to slow ghosts down while frightened
+  int releaseAt = 0; // tick at which the ghost leaves the house
+
+  void reset(int release) {
+    pos = home;
+    prev = home;
+    dir = Dir.left;
+    eaten = false;
+    skip = false;
+    releaseAt = release;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// App
+// ─────────────────────────────────────────────────────────────────────────────
 
 void main() {
   runApp(const PacManApp());
@@ -27,29 +108,30 @@ class PacManApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final base = ThemeData(
+      brightness: Brightness.dark,
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: Colors.blue,
+        brightness: Brightness.dark,
+      ),
+      scaffoldBackgroundColor: GameColors.background,
+      canvasColor: GameColors.background,
+    );
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Pac-Man (Flutter)',
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        canvasColor: GameColors.background,
-        primarySwatch: Colors.blue,
-        textTheme: GoogleFonts.pressStart2pTextTheme(
-          Theme.of(context).textTheme.apply(
-            bodyColor: Colors.white,
-            displayColor: Colors.white,
-          ),
+      theme: base.copyWith(
+        textTheme: GoogleFonts.pressStart2pTextTheme(base.textTheme).apply(
+          bodyColor: Colors.white,
+          displayColor: Colors.white,
         ),
       ),
       home: const GamePage(),
     );
   }
 }
-
-// --- Enums ---
-enum Dir { up, down, left, right, none }
-
-enum GameLevel { easy, medium, hard }
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key});
@@ -58,106 +140,156 @@ class GamePage extends StatefulWidget {
   State<GamePage> createState() => _GamePageState();
 }
 
-class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
-  // Map layout (0=pellet, 1=wall, 2=empty, 3=ghost house)
+class _GamePageState extends State<GamePage>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
+  // Maze: 0 pellet, 1 wall, 2 empty, 3 ghost house, 4 ghost door, 5 power pellet.
+  // Symmetric 21x21, with a tunnel on row 9.
   static const List<String> _mapLayout = [
     "111111111111111111111",
     "100000000010000000001",
-    "101101101111101101101",
+    "101101111010111101101",
+    "150000000000000000051",
+    "101101011111110101101",
+    "100001000000000100001",
+    "101111011111110111101",
     "100000000000000000001",
-    "101101011111101011011", // Corrected length to 21, was 20
-    "100001000010000100001",
-    "111101101111101101111",
-    "111101000000000101111",
-    "111101011331101011111", // Corrected length to 21, was 20
-    "111100013331300011111", // Corrected length to 21, was 20
-    "111101013331101011111", // Corrected length to 21, was 20
-    "111101000000000101111",
-    "111101011111101011111", // Corrected length to 21, was 20
-    "100000000010000000001",
-    "101101101111101101101",
+    "111101111141111101111",
+    "222000013333310000222",
+    "111101111111111101111",
+    "100000000000000000001",
+    "101101111010111101101",
     "100100000000000001001",
-    "110101011111101010111", // Corrected length to 21, was 20
-    "100001000010000100001",
-    "101111101111101111101",
+    "110101011111110101011",
+    "100000000010000000001",
+    "101101111010111101101",
+    "150000000000000000051",
+    "101101011111110101101",
     "100000000000000000001",
     "111111111111111111111",
   ];
 
-  // Grid configuration - DERIVE from _mapLayout to prevent out-of-bounds errors
   static final int rows = _mapLayout.length;
   static final int cols = _mapLayout[0].length;
 
-  // Game state
-  // Initialized to a default empty grid to prevent LateInitializationError.
-  // This will be overwritten by _newMap in initState.
-  List<List<int>> map = List.generate(
-    rows,
-    (r) => List.generate(cols, (c) => 2),
-  );
+  static const Point<int> _pacStart = Point(10, 17);
+  static const Point<int> _houseCenter = Point(10, 9);
+  static const Point<int> _houseExit = Point(10, 7);
+  static const List<Dir> _moveDirs = [Dir.up, Dir.down, Dir.left, Dir.right];
 
-  late Timer _timer;
-  late GameLevel _level; // Initialized in initState
+  // ── Game state ──
+  late List<List<int>> map;
+  GameLevel _level = GameLevel.easy;
   int tickMs = 150;
   double ghostAggression = 0.4;
-  int score = 0;
-  int pelletsLeft = 0;
-  bool isRunning = false;
-  final Random rand = Random();
+  int _frightTicks = 55;
+  int _releaseGap = 30;
 
-  // Pac-man state
-  Point<int> pac = const Point<int>(10, 17);
+  int score = 0;
+  int highScore = 0;
+  int lives = 3;
+  int pelletsLeft = 0;
+  int tickCount = 0;
+  int frightenedTicks = 0;
+  int ghostCombo = 0;
+
+  bool isRunning = false; // game loop is ticking
+  bool gameOver = true; // no game in progress
+  bool paused = false;
+  bool ready = false; // "READY!" countdown
+
+  Timer? _timer;
+  Timer? _readyTimer;
+  final Random rand = Random();
+  final FocusNode _focusNode = FocusNode();
+
+  late final AnimationController _mouthAnimation;
+  late final AnimationController _tickAnimation; // smooth tile-to-tile motion
+
+  // Pac-Man
+  Point<int> pac = _pacStart;
+  Point<int> prevPac = _pacStart;
   Dir pacDir = Dir.left;
   Dir _nextPacDir = Dir.left;
-  late AnimationController _mouthAnimation;
 
-  // Ghosts state
-  final List<Point<int>> ghosts = [
-    const Point(10, 9),
-    const Point(9, 10),
-    const Point(10, 10),
-    const Point(11, 10),
+  // Ghosts
+  late final List<Ghost> ghosts = [
+    Ghost(color: GameColors.ghosts[0], type: 0, home: const Point(10, 7)),
+    Ghost(color: GameColors.ghosts[1], type: 1, home: const Point(10, 9)),
+    Ghost(color: GameColors.ghosts[2], type: 2, home: const Point(9, 9)),
+    Ghost(color: GameColors.ghosts[3], type: 3, home: const Point(11, 9)),
   ];
-  final List<Dir> ghostDirs = [Dir.left, Dir.right, Dir.up, Dir.down];
 
+  // ── Lifecycle ──
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
     _mouthAnimation = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
     )..repeat(reverse: true);
 
-    // Initialize a default level and map immediately so build can function.
-    _level = GameLevel.easy;
-    _newMap(); // This will populate the map with the actual layout.
+    _tickAnimation = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: tickMs),
+      value: 1.0,
+    );
 
-    // Show level selection dialog when the widget is first built.
-    // This will then call _resetGame and start the actual game timer based on user choice.
+    _newMap();
     WidgetsBinding.instance.addPostFrameCallback((_) => _showLevelSelection());
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Auto-pause when the app goes to the background.
+    if (state != AppLifecycleState.resumed && !gameOver && !paused) {
+      _stopLoop();
+      setState(() => paused = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    _readyTimer?.cancel();
+    _mouthAnimation.dispose();
+    _tickAnimation.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  // ── Game flow ──
   void _showLevelSelection() {
+    if (!mounted) return;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.blueGrey.shade900,
-        title: const Text('SELECT LEVEL'),
+        title: const Text('SELECT LEVEL', style: TextStyle(fontSize: 14)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: GameLevel.values
               .map<Widget>(
-                (level) => ElevatedButton(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    _resetGame(level);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: GameColors.wall,
+                (level) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(ctx).pop();
+                      _resetGame(level);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: GameColors.wall,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: Text(
+                      level.name.toUpperCase(),
+                      style: const TextStyle(fontSize: 12),
+                    ),
                   ),
-                  child: Text(level.name.toUpperCase()),
                 ),
               )
               .toList(),
@@ -166,331 +298,543 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     );
   }
 
-  void _resetGame(GameLevel level) {
-    // If a timer is already running (e.g., from a previous game), cancel it.
-    if (isRunning) {
-      _timer.cancel();
+  void _applyLevel(GameLevel level) {
+    _level = level;
+    switch (level) {
+      case GameLevel.easy:
+        tickMs = 150;
+        ghostAggression = 0.4;
+        _frightTicks = 55;
+        _releaseGap = 30;
+        break;
+      case GameLevel.medium:
+        tickMs = 120;
+        ghostAggression = 0.65;
+        _frightTicks = 40;
+        _releaseGap = 22;
+        break;
+      case GameLevel.hard:
+        tickMs = 90;
+        ghostAggression = 0.85;
+        _frightTicks = 28;
+        _releaseGap = 15;
+        break;
     }
+    _tickAnimation.duration = Duration(milliseconds: tickMs);
+  }
 
-    setState(() {
-      _level = level;
-      switch (level) {
-        case GameLevel.easy:
-          tickMs = 150;
-          ghostAggression = 0.4;
-          break;
-        case GameLevel.medium:
-          tickMs = 120;
-          ghostAggression = 0.65;
-          break;
-        case GameLevel.hard:
-          tickMs = 90;
-          ghostAggression = 0.85;
-          break;
-      }
-      score = 0;
-      _newMap(); // Re-initialize map and other related game objects
-      isRunning = true;
-      _timer = Timer.periodic(Duration(milliseconds: tickMs), (_) => _tick());
-    });
+  void _resetGame(GameLevel level) {
+    _stopLoop();
+    _readyTimer?.cancel();
+    _applyLevel(level);
+    score = 0;
+    lives = 3;
+    gameOver = false;
+    paused = false;
+    _newMap();
+    _beginReady();
+    _focusNode.requestFocus();
   }
 
   void _newMap() {
     map = _mapLayout
         .map<List<int>>((row) => row.split('').map<int>(int.parse).toList())
         .toList();
+    map[_pacStart.y][_pacStart.x] = Tile.empty; // no pellet under Pac-Man
 
     pelletsLeft = 0;
-    for (int r = 0; r < rows; r++) {
-      for (int c = 0; c < cols; c++) {
-        if (map[r][c] == 0) pelletsLeft++;
+    for (final row in map) {
+      for (final cell in row) {
+        if (cell == Tile.pellet || cell == Tile.power) pelletsLeft++;
       }
     }
-
-    pac = const Point(10, 17);
-    pacDir = Dir.left;
-    _nextPacDir = Dir.left;
-    ghosts.setAll(0, [
-      const Point(10, 9),
-      const Point(9, 10),
-      const Point(10, 10),
-      const Point(11, 10),
-    ]);
+    _resetPositions();
   }
 
-  void _tick() {
-    if (!isRunning) return;
+  void _resetPositions() {
+    pac = _pacStart;
+    prevPac = _pacStart;
+    pacDir = Dir.left;
+    _nextPacDir = Dir.left;
+    tickCount = 0;
+    frightenedTicks = 0;
+    ghostCombo = 0;
+    for (int i = 0; i < ghosts.length; i++) {
+      ghosts[i].reset(i * _releaseGap);
+    }
+    _tickAnimation.value = 1.0;
+  }
 
-    setState(() {
-      // --- Pac-Man Movement ---
-      var nextPacTry = _nextPoint(pac, _nextPacDir);
-      if (!_isBlocked(nextPacTry, forPacman: true)) {
-        pacDir = _nextPacDir;
-        pac = nextPacTry;
-      } else {
-        var nextPacCurrent = _nextPoint(pac, pacDir);
-        if (!_isBlocked(nextPacCurrent, forPacman: true)) {
-          pac = nextPacCurrent;
-        }
-      }
-
-      // --- Eat Pellet ---
-      if (map[pac.y][pac.x] == 0) {
-        map[pac.y][pac.x] = 2; // Mark as eaten
-        score += 10;
-        pelletsLeft--;
-        if (pelletsLeft <= 0) {
-          _showDialog('YOU WIN!', 'Score: $score');
-          isRunning = false;
-        }
-      }
-
-      // --- Ghost Movement ---
-      for (int i = 0; i < ghosts.length; i++) {
-        final g = ghosts[i];
-        final options = _availableDirs(g);
-        if (options.isEmpty) continue;
-
-        // Prevent ghosts from reversing direction
-        final oppositeDir = _getOpposite(ghostDirs[i]);
-        if (options.length > 1 && options.contains(oppositeDir)) {
-          options.remove(oppositeDir);
-        }
-
-        Dir chosen = ghostDirs[i];
-        if (rand.nextDouble() < ghostAggression) {
-          // Greedy choice: get closer to Pac-Man
-          options.sort((a, b) {
-            final pa = _nextPoint(g, a);
-            final pb = _nextPoint(g, b);
-            final da = (pa.x - pac.x).abs() + (pa.y - pac.y).abs();
-            final db = (pb.x - pac.x).abs() + (pb.y - pac.y).abs();
-            return da.compareTo(db);
-          });
-          chosen = options.first;
-        } else {
-          // Random choice
-          chosen = options[rand.nextInt(options.length)];
-        }
-        ghostDirs[i] = chosen;
-        ghosts[i] = _nextPoint(g, chosen);
-      }
-
-      // --- Check Collisions ---
-      for (final g in ghosts) {
-        if (g == pac) {
-          _showDialog('GAME OVER', 'Score: $score');
-          isRunning = false;
-          break;
-        }
-      }
+  void _beginReady() {
+    _readyTimer?.cancel();
+    setState(() => ready = true);
+    _readyTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+      setState(() => ready = false);
+      if (!paused && !gameOver) _startLoop();
     });
   }
 
-  Point<int> _nextPoint(Point<int> p, Dir d) {
-    // Handle tunnel logic
-    if (p.x == 0 && d == Dir.left) return Point(cols - 1, p.y);
-    if (p.x == cols - 1 && d == Dir.right) return Point(0, p.y);
+  void _startLoop() {
+    _timer?.cancel();
+    isRunning = true;
+    _timer = Timer.periodic(Duration(milliseconds: tickMs), (_) => _tick());
+  }
 
-    switch (d) {
-      case Dir.up:
-        return Point(p.x, p.y - 1);
-      case Dir.down:
-        return Point(p.x, p.y + 1);
-      case Dir.left:
-        return Point(p.x - 1, p.y);
-      case Dir.right:
-        return Point(p.x + 1, p.y);
-      case Dir.none:
-        return p;
+  void _stopLoop() {
+    _timer?.cancel();
+    _timer = null;
+    isRunning = false;
+    _tickAnimation.value = 1.0; // settle sprites exactly on their tiles
+  }
+
+  void _togglePause() {
+    if (gameOver || ready) return;
+    setState(() => paused = !paused);
+    if (paused) {
+      _stopLoop();
+    } else {
+      _startLoop();
     }
+    _focusNode.requestFocus();
   }
 
-  bool _isBlocked(Point<int> p, {bool forPacman = false}) {
-    // Check for out of bounds (excluding tunnel wraps)
-    if (p.x < 0 || p.x >= cols || p.y < 0 || p.y >= rows) return true;
-    final cell = map[p.y][p.x];
-    return cell == 1 || (forPacman && cell == 3);
-  }
-
-  List<Dir> _availableDirs(Point<int> p) {
-    final out = <Dir>[];
-    for (final d in [Dir.up, Dir.down, Dir.left, Dir.right]) {
-      if (!_isBlocked(_nextPoint(p, d))) out.add(d);
+  void _loseLife() {
+    _stopLoop();
+    lives--;
+    if (lives <= 0) {
+      _finish(won: false);
+      return;
     }
-    return out;
+    _resetPositions();
+    _beginReady();
   }
 
-  Dir _getOpposite(Dir d) {
-    switch (d) {
-      case Dir.up:
-        return Dir.down;
-      case Dir.down:
-        return Dir.up;
-      case Dir.left:
-        return Dir.right;
-      case Dir.right:
-        return Dir.left;
-      default:
-        return Dir.none;
-    }
-  }
-
-  void _changeDirection(Dir d) {
-    _nextPacDir = d;
+  void _finish({required bool won}) {
+    _stopLoop();
+    if (score > highScore) highScore = score;
+    setState(() => gameOver = true);
+    _showDialog(
+      won ? 'YOU WIN!' : 'GAME OVER',
+      'Score: $score\nBest: $highScore',
+    );
   }
 
   void _showDialog(String title, String content) {
     if (!mounted) return;
-    _timer.cancel(); // Cancel timer when dialog is shown
     showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.blueGrey.shade900,
-        title: Text(title),
-        content: Text(content),
+        title: Text(title, style: const TextStyle(fontSize: 16)),
+        content: Text(content, style: const TextStyle(fontSize: 12, height: 1.6)),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
               _showLevelSelection();
             },
-            child: const Text('Play Again'),
+            child: const Text('Play Again', style: TextStyle(fontSize: 12)),
           ),
         ],
       ),
     );
   }
 
-  @override
-  void dispose() {
-    // Ensure timer is cancelled if it was initialized
-    if (isRunning && _timer.isActive) {
-      // Check _timer.isActive before cancelling
-      _timer.cancel();
+  // ── Game loop ──
+  void _tick() {
+    if (!isRunning) return;
+    tickCount++;
+
+    if (frightenedTicks > 0) {
+      frightenedTicks--;
+      if (frightenedTicks == 0) ghostCombo = 0;
     }
-    _mouthAnimation.dispose();
-    super.dispose();
+
+    _movePac();
+    _collect();
+
+    if (pelletsLeft <= 0) {
+      _finish(won: true);
+      return;
+    }
+    if (_handleCollisions(ghostsMoved: false)) return;
+
+    for (final g in ghosts) {
+      _moveGhost(g);
+    }
+    if (_handleCollisions(ghostsMoved: true)) return;
+
+    setState(() {});
+    _tickAnimation.forward(from: 0);
   }
 
-  // --- Widgets ---
+  void _movePac() {
+    prevPac = pac;
+    final wanted = _nextPoint(pac, _nextPacDir);
+    if (!_isBlocked(wanted)) {
+      pacDir = _nextPacDir;
+      pac = wanted;
+    } else {
+      final straight = _nextPoint(pac, pacDir);
+      if (!_isBlocked(straight)) pac = straight;
+    }
+  }
+
+  void _collect() {
+    final cell = map[pac.y][pac.x];
+    if (cell == Tile.pellet) {
+      map[pac.y][pac.x] = Tile.empty;
+      score += 10;
+      pelletsLeft--;
+    } else if (cell == Tile.power) {
+      map[pac.y][pac.x] = Tile.empty;
+      score += 50;
+      pelletsLeft--;
+      frightenedTicks = _frightTicks;
+      ghostCombo = 0;
+      for (final g in ghosts) {
+        if (!g.eaten && !_inHouse(g.pos)) g.dir = oppositeOf(g.dir);
+      }
+    }
+    if (score > highScore) highScore = score;
+  }
+
+  /// Returns true if the game state changed in a way that ends this tick
+  /// (a life was lost).
+  bool _handleCollisions({required bool ghostsMoved}) {
+    for (final g in ghosts) {
+      if (g.eaten) continue;
+      final hit = g.pos == pac ||
+          (ghostsMoved && g.pos == prevPac && g.prev == pac); // swapped places
+      if (!hit) continue;
+
+      if (frightenedTicks > 0) {
+        g.eaten = true;
+        score += 200 * (1 << ghostCombo);
+        ghostCombo = min(ghostCombo + 1, 3);
+        if (score > highScore) highScore = score;
+      } else {
+        _loseLife();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ── Ghost AI ──
+  bool _inHouse(Point<int> p) {
+    final c = map[p.y][p.x];
+    return c == Tile.house || c == Tile.door;
+  }
+
+  void _moveGhost(Ghost g) {
+    g.prev = g.pos;
+    if (tickCount < g.releaseAt) return; // still waiting in the house
+
+    final frightened = frightenedTicks > 0 && !g.eaten;
+    if (frightened) {
+      g.skip = !g.skip;
+      if (g.skip) return; // frightened ghosts move at half speed
+    }
+
+    // Eaten ghosts rush back to the house, then revive.
+    if (g.eaten) {
+      if (g.pos == _houseCenter) {
+        g.eaten = false;
+        g.dir = Dir.up;
+      } else {
+        final d = _bfsDir(g.pos, _houseCenter);
+        if (d != null) {
+          g.dir = d;
+          g.pos = _nextPoint(g.pos, d);
+        }
+        return;
+      }
+    }
+
+    final inHouse = _inHouse(g.pos);
+    final options = <Dir>[
+      for (final d in _moveDirs)
+        if (!_isBlocked(_nextPoint(g.pos, d), house: inHouse)) d,
+    ];
+    if (options.isEmpty) return;
+
+    // Don't reverse unless it's the only choice.
+    final back = oppositeOf(g.dir);
+    if (options.length > 1) options.remove(back);
+
+    Dir chosen;
+    if (inHouse) {
+      // Head for the exit.
+      chosen = _bestToward(g.pos, options, _houseExit);
+    } else if (frightened) {
+      chosen = options[rand.nextInt(options.length)];
+    } else if (rand.nextDouble() < ghostAggression) {
+      chosen = _bestToward(g.pos, options, _ghostTarget(g));
+    } else {
+      chosen = options[rand.nextInt(options.length)];
+    }
+
+    g.dir = chosen;
+    g.pos = _nextPoint(g.pos, chosen);
+  }
+
+  Dir _bestToward(Point<int> from, List<Dir> options, Point<int> target) {
+    Dir best = options.first;
+    int bestDist = 1 << 30;
+    for (final d in options) {
+      final n = _nextPoint(from, d);
+      final dist = pow(n.x - target.x, 2).toInt() + pow(n.y - target.y, 2).toInt();
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = d;
+      }
+    }
+    return best;
+  }
+
+  Point<int> _ghostTarget(Ghost g) {
+    final v = dirVector(pacDir);
+    switch (g.type) {
+      case 0: // Blinky: straight at Pac-Man
+        return pac;
+      case 1: // Pinky: four tiles ahead of Pac-Man
+        return Point<int>(pac.x + v.x * 4, pac.y + v.y * 4);
+      case 2: // Inky: mirror Blinky around a point two tiles ahead of Pac-Man
+        final ax = pac.x + v.x * 2;
+        final ay = pac.y + v.y * 2;
+        final b = ghosts[0].pos;
+        return Point<int>(2 * ax - b.x, 2 * ay - b.y);
+      default: // Clyde: chase when far away, retreat to a corner when close
+        final dist = (g.pos.x - pac.x).abs() + (g.pos.y - pac.y).abs();
+        return dist > 8 ? pac : Point<int>(1, rows - 2);
+    }
+  }
+
+  /// Shortest-path first step from [from] to [to] (ghosts may use the house).
+  Dir? _bfsDir(Point<int> from, Point<int> to) {
+    if (from == to) return null;
+    final startKey = from.y * cols + from.x;
+    final visited = <int>{startKey};
+    final first = <int, Dir>{};
+    final queue = <Point<int>>[from];
+    int head = 0;
+    while (head < queue.length) {
+      final cur = queue[head++];
+      final curKey = cur.y * cols + cur.x;
+      for (final d in _moveDirs) {
+        final n = _nextPoint(cur, d);
+        if (_isBlocked(n, house: true)) continue;
+        final key = n.y * cols + n.x;
+        if (!visited.add(key)) continue;
+        first[key] = curKey == startKey ? d : first[curKey]!;
+        if (n == to) return first[key];
+        queue.add(n);
+      }
+    }
+    return null;
+  }
+
+  // ── Movement helpers ──
+  Point<int> _nextPoint(Point<int> p, Dir d) {
+    // Tunnel wrap
+    if (p.x == 0 && d == Dir.left) return Point(cols - 1, p.y);
+    if (p.x == cols - 1 && d == Dir.right) return Point(0, p.y);
+    final v = dirVector(d);
+    return Point(p.x + v.x, p.y + v.y);
+  }
+
+  bool _isBlocked(Point<int> p, {bool house = false}) {
+    if (p.x < 0 || p.x >= cols || p.y < 0 || p.y >= rows) return true;
+    final cell = map[p.y][p.x];
+    if (cell == Tile.wall) return true;
+    if (cell == Tile.house || cell == Tile.door) return !house;
+    return false;
+  }
+
+  void _changeDirection(Dir d) {
+    if (gameOver) return;
+    _nextPacDir = d;
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final k = event.logicalKey;
+    if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.keyW) {
+      _changeDirection(Dir.up);
+    } else if (k == LogicalKeyboardKey.arrowDown ||
+        k == LogicalKeyboardKey.keyS) {
+      _changeDirection(Dir.down);
+    } else if (k == LogicalKeyboardKey.arrowLeft ||
+        k == LogicalKeyboardKey.keyA) {
+      _changeDirection(Dir.left);
+    } else if (k == LogicalKeyboardKey.arrowRight ||
+        k == LogicalKeyboardKey.keyD) {
+      _changeDirection(Dir.right);
+    } else if (k == LogicalKeyboardKey.space || k == LogicalKeyboardKey.keyP) {
+      _togglePause();
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
+  // ── UI ──
   @override
   Widget build(BuildContext context) {
+    final showPad = MediaQuery.sizeOf(context).width < 800;
     return Scaffold(
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return Column(
-              children: [
-                _buildHeader(),
-                Expanded(child: _buildGameCanvas(constraints)),
-                _buildControls(),
-                const SizedBox(height: 20),
-              ],
-            );
-          },
+        child: Focus(
+          focusNode: _focusNode,
+          autofocus: true,
+          onKeyEvent: _onKey,
+          child: Column(
+            children: [
+              _buildHeader(),
+              Expanded(child: _buildGameCanvas()),
+              if (showPad) _buildControls(),
+              const SizedBox(height: 12),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildHeader() {
+    const small = TextStyle(fontSize: 10);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Column(
         children: [
-          Text('SCORE: $score', style: const TextStyle(fontSize: 14)),
-          // _level is initialized in initState, so it's always safe to display.
-          Text(
-            'LEVEL: ${_level.name.toUpperCase()}',
-            style: const TextStyle(fontSize: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('SCORE $score', style: small),
+              Text('BEST $highScore', style: small),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: List.generate(
+                  max(lives, 0),
+                  (_) => Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Icon(Icons.circle, color: GameColors.pacman, size: 14),
+                  ),
+                ),
+              ),
+              Text(_level.name.toUpperCase(), style: small),
+              SizedBox(
+                height: 28,
+                width: 28,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  iconSize: 22,
+                  tooltip: paused ? 'Resume' : 'Pause',
+                  onPressed: _togglePause,
+                  icon: Icon(paused ? Icons.play_arrow : Icons.pause),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildGameCanvas(BoxConstraints constraints) {
-    // Subtract space for header (approx 50) and controls (approx 120) for better calculation
-    final availableHeight = constraints.maxHeight - (kToolbarHeight + 120);
-    final w = constraints.maxWidth;
-    // Ensure h is positive and finite; otherwise, use a reasonable proportion of total height.
-    final h = availableHeight.isFinite && availableHeight > 0
-        ? availableHeight
-        : constraints.maxHeight * 0.7;
+  Widget _buildGameCanvas() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tileSize = min(
+          constraints.maxWidth / cols,
+          constraints.maxHeight / rows,
+        );
 
-    final tileSize = min(w / cols, h / rows);
-
-    return GestureDetector(
-      onPanUpdate: (d) {
-        if (d.delta.distance < 2) return; // Ignore small movements
-        if (isRunning) {
-          // Only allow direction changes if game is running
-          if (d.delta.dx.abs() > d.delta.dy.abs()) {
-            // Horizontal movement is dominant
-            _changeDirection(d.delta.dx > 0 ? Dir.right : Dir.left);
-          } else {
-            // Vertical movement is dominant
-            _changeDirection(d.delta.dy > 0 ? Dir.down : Dir.up);
-          }
-        }
-      },
-      child: Container(
-        color: GameColors.background,
-        child: Center(
-          child: SizedBox(
-            width: tileSize * cols,
-            height: tileSize * rows,
-            child: CustomPaint(
-              painter: _GamePainter(
-                map: map,
-                pac: pac,
-                pacDir: pacDir,
-                ghosts: ghosts,
-                tileSize: tileSize,
-                mouthAnimation: _mouthAnimation,
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanUpdate: (d) {
+            if (d.delta.distance < 2) return;
+            if (d.delta.dx.abs() > d.delta.dy.abs()) {
+              _changeDirection(d.delta.dx > 0 ? Dir.right : Dir.left);
+            } else {
+              _changeDirection(d.delta.dy > 0 ? Dir.down : Dir.up);
+            }
+          },
+          child: Center(
+            child: SizedBox(
+              width: tileSize * cols,
+              height: tileSize * rows,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _GamePainter(
+                        map: map,
+                        pac: pac,
+                        prevPac: prevPac,
+                        pacDir: pacDir,
+                        ghosts: ghosts,
+                        frightenedTicks: frightenedTicks,
+                        tileSize: tileSize,
+                        mouthAnimation: _mouthAnimation,
+                        tickAnimation: _tickAnimation,
+                      ),
+                    ),
+                  ),
+                  if (ready || paused)
+                    Center(
+                      child: Padding(
+                        padding: EdgeInsets.only(top: tileSize * 3),
+                        child: Text(
+                          ready ? 'READY!' : 'PAUSED',
+                          style: TextStyle(
+                            fontSize: max(10, tileSize * 0.7),
+                            color: GameColors.pacman,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
-        ),
-      ), // Closing parenthesis for Container, and comma for GestureDetector's child
-    ); // Closing parenthesis and semicolon for GestureDetector
+        );
+      },
+    );
   }
 
   Widget _buildControls() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _controlButton(Icons.arrow_left, Dir.left),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _controlButton(Icons.arrow_upward, Dir.up),
-              const SizedBox(height: 40),
-              _controlButton(Icons.arrow_downward, Dir.down),
-            ],
-          ),
-          _controlButton(Icons.arrow_right, Dir.right),
-        ],
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _controlButton(Icons.keyboard_arrow_up, Dir.up),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _controlButton(Icons.keyboard_arrow_left, Dir.left),
+            const SizedBox(width: 48),
+            _controlButton(Icons.keyboard_arrow_right, Dir.right),
+          ],
+        ),
+        _controlButton(Icons.keyboard_arrow_down, Dir.down),
+      ],
     );
   }
 
   Widget _controlButton(IconData icon, Dir dir) {
     return InkWell(
-      onTap: () {
-        if (isRunning) {
-          // Only allow direction changes if game is running
-          _changeDirection(dir);
-        }
-      },
+      onTap: () => _changeDirection(dir),
       borderRadius: BorderRadius.circular(50),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.all(2),
+        padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: Colors.blueGrey.shade800.withValues(alpha: 0.8),
@@ -501,171 +845,185 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Painter
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _GamePainter extends CustomPainter {
   final List<List<int>> map;
   final Point<int> pac;
+  final Point<int> prevPac;
   final Dir pacDir;
-  final List<Point<int>> ghosts;
+  final List<Ghost> ghosts;
+  final int frightenedTicks;
   final double tileSize;
   final Animation<double> mouthAnimation;
+  final Animation<double> tickAnimation;
 
   _GamePainter({
     required this.map,
     required this.pac,
+    required this.prevPac,
     required this.pacDir,
     required this.ghosts,
+    required this.frightenedTicks,
     required this.tileSize,
     required this.mouthAnimation,
-  }) : super(repaint: mouthAnimation);
+    required this.tickAnimation,
+  }) : super(repaint: Listenable.merge([mouthAnimation, tickAnimation]));
+
+  /// Interpolated tile position (in tile units). Skips the lerp for tunnel wraps.
+  Offset _lerp(Point<int> from, Point<int> to) {
+    if ((to.x - from.x).abs() > 1 || (to.y - from.y).abs() > 1) {
+      return Offset(to.x.toDouble(), to.y.toDouble());
+    }
+    final t = tickAnimation.value;
+    return Offset(
+      from.x + (to.x - from.x) * t,
+      from.y + (to.y - from.y) * t,
+    );
+  }
+
+  Rect _spriteRect(Offset tilePos) => Rect.fromLTWH(
+        tilePos.dx * tileSize,
+        tilePos.dy * tileSize,
+        tileSize,
+        tileSize,
+      );
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint();
+    final wallFill = Paint()..color = GameColors.wallFill;
+    final wallStroke = Paint()
+      ..color = GameColors.wall
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = max(1.5, tileSize * 0.1);
 
-    // --- Draw Map and Pellets ---
+    // ── Maze ──
     for (int r = 0; r < map.length; r++) {
       for (int c = 0; c < map[r].length; c++) {
-        final rect = Rect.fromLTWH(
-          c * tileSize,
-          r * tileSize,
-          tileSize,
-          tileSize,
-        );
-        if (map[r][c] == 1) {
-          // Wall
-          paint.color = GameColors.wall;
-          paint.style = PaintingStyle.fill;
-          canvas.drawRRect(
-            RRect.fromRectAndRadius(
-              rect.deflate(2.0),
-              const Radius.circular(4),
-            ),
-            paint,
-          );
-        } else if (map[r][c] == 0) {
-          // Pellet
-          paint.color = GameColors.pellet;
-          canvas.drawCircle(rect.center, tileSize * 0.1, paint);
+        final rect = Rect.fromLTWH(c * tileSize, r * tileSize, tileSize, tileSize);
+        switch (map[r][c]) {
+          case Tile.wall:
+            final rr = RRect.fromRectAndRadius(
+              rect.deflate(tileSize * 0.08),
+              Radius.circular(tileSize * 0.25),
+            );
+            canvas.drawRRect(rr, wallFill);
+            canvas.drawRRect(rr, wallStroke);
+            break;
+          case Tile.pellet:
+            paint.color = GameColors.pellet;
+            canvas.drawCircle(rect.center, tileSize * 0.1, paint);
+            break;
+          case Tile.power:
+            paint.color = GameColors.pellet;
+            canvas.drawCircle(
+              rect.center,
+              tileSize * (0.24 + 0.06 * mouthAnimation.value),
+              paint,
+            );
+            break;
+          case Tile.door:
+            paint
+              ..color = GameColors.door
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = max(2, tileSize * 0.14);
+            canvas.drawLine(rect.centerLeft, rect.centerRight, paint);
+            paint.style = PaintingStyle.fill;
+            break;
+          default:
+            break;
         }
       }
     }
+    paint.style = PaintingStyle.fill;
 
-    // --- Draw Pac-Man ---
-    final pacRect = Rect.fromLTWH(
-      pac.x * tileSize,
-      pac.y * tileSize,
-      tileSize,
-      tileSize,
-    );
+    // ── Pac-Man ──
+    final pacRect = _spriteRect(_lerp(prevPac, pac)).deflate(tileSize * 0.08);
     paint.color = GameColors.pacman;
 
-    final mouthAngle = (pi / 4) * (1 - mouthAnimation.value);
+    final mouth = (pi / 4) * (1 - mouthAnimation.value);
     double startAngle;
-
     switch (pacDir) {
       case Dir.right:
-        startAngle = mouthAngle;
+      case Dir.none:
+        startAngle = mouth;
         break;
       case Dir.left:
-        startAngle = pi + mouthAngle;
+        startAngle = pi + mouth;
         break;
       case Dir.up:
-        startAngle = -pi / 2 + mouthAngle;
+        startAngle = -pi / 2 + mouth;
         break;
       case Dir.down:
-        startAngle = pi / 2 + mouthAngle;
-        break;
-      case Dir.none:
-        startAngle = mouthAngle;
+        startAngle = pi / 2 + mouth;
         break;
     }
-    final sweepAngle = 2 * pi - (mouthAngle * 2);
-    canvas.drawArc(
-      pacRect.deflate(tileSize * 0.1),
-      startAngle,
-      sweepAngle,
-      true,
-      paint,
-    );
+    canvas.drawArc(pacRect, startAngle, 2 * pi - mouth * 2, true, paint);
 
-    // --- Draw Ghosts ---
-    for (int i = 0; i < ghosts.length; i++) {
-      final g = ghosts[i];
-      final gr = Rect.fromLTWH(
-        g.x * tileSize,
-        g.y * tileSize,
-        tileSize,
-        tileSize,
-      ).deflate(tileSize * 0.1);
-      paint.color = GameColors.ghosts[i % GameColors.ghosts.length];
-
-      // Ghost body shape
-      final path = Path();
-      path.moveTo(gr.left, gr.center.dy);
-      path.arcTo(
-        Rect.fromCircle(
-          center: Offset(gr.center.dx, gr.top + gr.height / 4),
-          radius: gr.width / 2,
-        ),
-        pi,
-        pi,
-        false,
-      );
-      path.lineTo(gr.right, gr.center.dy);
-      // Wavy bottom
-      path.quadraticBezierTo(
-        gr.right - gr.width / 4,
-        gr.bottom + gr.height / 8,
-        gr.center.dx,
-        gr.bottom,
-      );
-      path.quadraticBezierTo(
-        gr.left + gr.width / 4,
-        gr.bottom - gr.height / 8,
-        gr.left,
-        gr.center.dy,
-      );
-      path.close();
-      canvas.drawPath(path, paint);
-
-      // Eyes
-      final eyeRadius = gr.width * 0.15;
-      final eyeOffsetX = gr.width * 0.22;
-      final eyeOffsetY = gr.height * -0.1;
-      final pupilRadius = eyeRadius * 0.5;
-
-      // Left eye
-      paint.color = Colors.white;
-      canvas.drawCircle(
-        gr.center.translate(-eyeOffsetX, eyeOffsetY),
-        eyeRadius,
-        paint,
-      );
-      paint.color = Colors.black;
-      canvas.drawCircle(
-        gr.center.translate(-eyeOffsetX, eyeOffsetY),
-        pupilRadius,
-        paint,
-      );
-
-      // Right eye
-      paint.color = Colors.white;
-      canvas.drawCircle(
-        gr.center.translate(eyeOffsetX, eyeOffsetY),
-        eyeRadius,
-        paint,
-      );
-      paint.color = Colors.black;
-      canvas.drawCircle(
-        gr.center.translate(eyeOffsetX, eyeOffsetY),
-        pupilRadius,
-        paint,
-      );
+    // ── Ghosts ──
+    for (final g in ghosts) {
+      final gr = _spriteRect(_lerp(g.prev, g.pos)).deflate(tileSize * 0.08);
+      _drawGhost(canvas, paint, g, gr);
     }
+  }
+
+  void _drawGhost(Canvas canvas, Paint paint, Ghost g, Rect gr) {
+    final frightened = frightenedTicks > 0 && !g.eaten;
+    final flash = frightened && frightenedTicks <= 10 && frightenedTicks.isEven;
+
+    if (!g.eaten) {
+      paint.color =
+          frightened ? (flash ? Colors.white : GameColors.frightened) : g.color;
+      canvas.drawPath(_ghostBody(gr), paint);
+    }
+
+    final eyeR = gr.width * 0.16;
+    final eyeDx = gr.width * 0.2;
+    final eyeY = gr.center.dy - gr.height * 0.08;
+    final left = Offset(gr.center.dx - eyeDx, eyeY);
+    final right = Offset(gr.center.dx + eyeDx, eyeY);
+
+    if (frightened) {
+      paint.color = flash ? Colors.red.shade400 : Colors.pink.shade100;
+      canvas.drawCircle(left, eyeR * 0.6, paint);
+      canvas.drawCircle(right, eyeR * 0.6, paint);
+    } else {
+      final v = dirVector(g.dir);
+      final shift = Offset(v.x.toDouble(), v.y.toDouble()) * (eyeR * 0.45);
+      paint.color = Colors.white;
+      canvas.drawCircle(left, eyeR, paint);
+      canvas.drawCircle(right, eyeR, paint);
+      paint.color = Colors.blue.shade900;
+      canvas.drawCircle(left + shift, eyeR * 0.5, paint);
+      canvas.drawCircle(right + shift, eyeR * 0.5, paint);
+    }
+  }
+
+  Path _ghostBody(Rect gr) {
+    final r = gr.width / 2;
+    final waveH = gr.height * 0.14;
+    final seg = gr.width / 3;
+    final path = Path()
+      ..moveTo(gr.left, gr.bottom)
+      ..lineTo(gr.left, gr.top + r)
+      ..arcToPoint(
+        Offset(gr.right, gr.top + r),
+        radius: Radius.circular(r),
+      )
+      ..lineTo(gr.right, gr.bottom);
+    // Scalloped bottom edge, right to left.
+    for (int i = 0; i < 3; i++) {
+      final x0 = gr.right - seg * i;
+      final x1 = x0 - seg;
+      path.quadraticBezierTo((x0 + x1) / 2, gr.bottom - waveH * 2, x1, gr.bottom);
+    }
+    path.close();
+    return path;
   }
 
   @override
-  bool shouldRepaint(covariant _GamePainter newDelegate) {
-    return true;
-  }
+  bool shouldRepaint(covariant _GamePainter oldDelegate) => true;
 }
