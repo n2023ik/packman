@@ -10,9 +10,11 @@ import 'package:google_fonts/google_fonts.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 class GameColors {
-  static final wall = Colors.blue.shade700;
-  static final wallFill = const Color(0xFF0A1560);
   static const background = Colors.black;
+  static const wallFill = Color(0xFF080F52);
+  static const wallLine = Color(0xFF4DA3FF);
+  static const wallGlow = Color(0xFF2962FF);
+  static const panel = Color(0xFF0B1030);
   static final pellet = Colors.yellow.shade200;
   static final pacman = Colors.yellow.shade600;
   static final frightened = Colors.blue.shade600;
@@ -38,6 +40,17 @@ class Tile {
 enum Dir { up, down, left, right, none }
 
 enum GameLevel { easy, medium, hard }
+
+Color levelColor(GameLevel l) {
+  switch (l) {
+    case GameLevel.easy:
+      return Colors.green.shade500;
+    case GameLevel.medium:
+      return Colors.orange.shade600;
+    case GameLevel.hard:
+      return Colors.red.shade500;
+  }
+}
 
 Point<int> dirVector(Dir d) {
   switch (d) {
@@ -82,7 +95,7 @@ class Ghost {
   Point<int> prev;
   Dir dir = Dir.left;
   bool eaten = false;
-  bool skip = false; // used to slow ghosts down while frightened
+  bool skip = false; // slows ghosts down while frightened
   int releaseAt = 0; // tick at which the ghost leaves the house
 
   void reset(int release) {
@@ -200,7 +213,6 @@ class _GamePageState extends State<GamePage>
   Timer? _timer;
   Timer? _readyTimer;
   final Random rand = Random();
-  final FocusNode _focusNode = FocusNode();
 
   late final AnimationController _mouthAnimation;
   late final AnimationController _tickAnimation; // smooth tile-to-tile motion
@@ -224,6 +236,8 @@ class _GamePageState extends State<GamePage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Global keyboard handler: works no matter which widget has focus.
+    HardwareKeyboard.instance.addHandler(_onHardwareKey);
 
     _mouthAnimation = AnimationController(
       vsync: this,
@@ -251,13 +265,42 @@ class _GamePageState extends State<GamePage>
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onHardwareKey);
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _readyTimer?.cancel();
     _mouthAnimation.dispose();
     _tickAnimation.dispose();
-    _focusNode.dispose();
     super.dispose();
+  }
+
+  // ── Input ──
+  bool _onHardwareKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (gameOver) return false; // let dialogs handle keys
+    final k = event.logicalKey;
+    if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.keyW) {
+      _changeDirection(Dir.up);
+    } else if (k == LogicalKeyboardKey.arrowDown ||
+        k == LogicalKeyboardKey.keyS) {
+      _changeDirection(Dir.down);
+    } else if (k == LogicalKeyboardKey.arrowLeft ||
+        k == LogicalKeyboardKey.keyA) {
+      _changeDirection(Dir.left);
+    } else if (k == LogicalKeyboardKey.arrowRight ||
+        k == LogicalKeyboardKey.keyD) {
+      _changeDirection(Dir.right);
+    } else if (k == LogicalKeyboardKey.space || k == LogicalKeyboardKey.keyP) {
+      _togglePause();
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  void _changeDirection(Dir d) {
+    if (gameOver) return;
+    _nextPacDir = d;
   }
 
   // ── Game flow ──
@@ -266,24 +309,38 @@ class _GamePageState extends State<GamePage>
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.blueGrey.shade900,
-        title: const Text('SELECT LEVEL', style: TextStyle(fontSize: 14)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: GameLevel.values
-              .map<Widget>(
-                (level) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(22),
+          decoration: _panelDecoration(glow: GameColors.pacman),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _glowText('PAC-MAN', 22, GameColors.pacman),
+              const SizedBox(height: 8),
+              const Text(
+                'SELECT LEVEL',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 10, color: Colors.white70),
+              ),
+              const SizedBox(height: 18),
+              for (final level in GameLevel.values)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
                   child: ElevatedButton(
                     onPressed: () {
                       Navigator.of(ctx).pop();
                       _resetGame(level);
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: GameColors.wall,
+                      backgroundColor: levelColor(level),
                       foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     child: Text(
                       level.name.toUpperCase(),
@@ -291,8 +348,14 @@ class _GamePageState extends State<GamePage>
                     ),
                   ),
                 ),
-              )
-              .toList(),
+              const SizedBox(height: 10),
+              const Text(
+                'ARROWS / WASD  •  SPACE = PAUSE\nOR SWIPE / TAP THE PAD',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 7, color: Colors.white38, height: 1.8),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -333,7 +396,6 @@ class _GamePageState extends State<GamePage>
     paused = false;
     _newMap();
     _beginReady();
-    _focusNode.requestFocus();
   }
 
   void _newMap() {
@@ -396,7 +458,6 @@ class _GamePageState extends State<GamePage>
     } else {
       _startLoop();
     }
-    _focusNode.requestFocus();
   }
 
   void _loseLife() {
@@ -416,28 +477,51 @@ class _GamePageState extends State<GamePage>
     setState(() => gameOver = true);
     _showDialog(
       won ? 'YOU WIN!' : 'GAME OVER',
-      'Score: $score\nBest: $highScore',
+      'SCORE  $score\nBEST   $highScore',
+      won ? Colors.greenAccent : Colors.redAccent,
     );
   }
 
-  void _showDialog(String title, String content) {
+  void _showDialog(String title, String content, Color accent) {
     if (!mounted) return;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.blueGrey.shade900,
-        title: Text(title, style: const TextStyle(fontSize: 16)),
-        content: Text(content, style: const TextStyle(fontSize: 12, height: 1.6)),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              _showLevelSelection();
-            },
-            child: const Text('Play Again', style: TextStyle(fontSize: 12)),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(22),
+          decoration: _panelDecoration(glow: accent),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _glowText(title, 20, accent),
+              const SizedBox(height: 18),
+              Text(
+                content,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 11, height: 2),
+              ),
+              const SizedBox(height: 18),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  _showLevelSelection();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: GameColors.pacman,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('PLAY AGAIN', style: TextStyle(fontSize: 11)),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -501,8 +585,7 @@ class _GamePageState extends State<GamePage>
     if (score > highScore) highScore = score;
   }
 
-  /// Returns true if the game state changed in a way that ends this tick
-  /// (a life was lost).
+  /// Returns true if a life was lost (the tick must stop).
   bool _handleCollisions({required bool ghostsMoved}) {
     for (final g in ghosts) {
       if (g.eaten) continue;
@@ -567,7 +650,6 @@ class _GamePageState extends State<GamePage>
 
     Dir chosen;
     if (inHouse) {
-      // Head for the exit.
       chosen = _bestToward(g.pos, options, _houseExit);
     } else if (frightened) {
       chosen = options[rand.nextInt(options.length)];
@@ -586,7 +668,9 @@ class _GamePageState extends State<GamePage>
     int bestDist = 1 << 30;
     for (final d in options) {
       final n = _nextPoint(from, d);
-      final dist = pow(n.x - target.x, 2).toInt() + pow(n.y - target.y, 2).toInt();
+      final dx = n.x - target.x;
+      final dy = n.y - target.y;
+      final dist = dx * dx + dy * dy;
       if (dist < bestDist) {
         bestDist = dist;
         best = d;
@@ -654,98 +738,238 @@ class _GamePageState extends State<GamePage>
     return false;
   }
 
-  void _changeDirection(Dir d) {
-    if (gameOver) return;
-    _nextPacDir = d;
+  // ───────────────────────────────────────────────────────────────────────────
+  // UI
+  // ───────────────────────────────────────────────────────────────────────────
+
+  BoxDecoration _panelDecoration({Color? glow}) {
+    final c = glow ?? GameColors.wallGlow;
+    return BoxDecoration(
+      color: GameColors.panel,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: c.withValues(alpha: 0.7), width: 1.5),
+      boxShadow: [BoxShadow(color: c.withValues(alpha: 0.3), blurRadius: 18)],
+    );
   }
 
-  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    final k = event.logicalKey;
-    if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.keyW) {
-      _changeDirection(Dir.up);
-    } else if (k == LogicalKeyboardKey.arrowDown ||
-        k == LogicalKeyboardKey.keyS) {
-      _changeDirection(Dir.down);
-    } else if (k == LogicalKeyboardKey.arrowLeft ||
-        k == LogicalKeyboardKey.keyA) {
-      _changeDirection(Dir.left);
-    } else if (k == LogicalKeyboardKey.arrowRight ||
-        k == LogicalKeyboardKey.keyD) {
-      _changeDirection(Dir.right);
-    } else if (k == LogicalKeyboardKey.space || k == LogicalKeyboardKey.keyP) {
-      _togglePause();
-    } else {
-      return KeyEventResult.ignored;
-    }
-    return KeyEventResult.handled;
+  Widget _glowText(String text, double size, Color color) {
+    return Text(
+      text,
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontSize: size,
+        color: color,
+        letterSpacing: 2,
+        shadows: [
+          Shadow(color: color.withValues(alpha: 0.8), blurRadius: 14),
+          Shadow(color: color.withValues(alpha: 0.5), blurRadius: 28),
+        ],
+      ),
+    );
   }
 
-  // ── UI ──
+  Widget _card(String label, Widget value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: _panelDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 8, color: Colors.white54),
+          ),
+          const SizedBox(height: 8),
+          value,
+        ],
+      ),
+    );
+  }
+
+  Widget _statCard(String label, String value) =>
+      _card(label, Text(value, style: const TextStyle(fontSize: 14)));
+
+  Widget _livesRow() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (int i = 0; i < 3; i++)
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: Icon(
+              Icons.circle,
+              size: 16,
+              color: i < lives
+                  ? GameColors.pacman
+                  : Colors.white.withValues(alpha: 0.12),
+              shadows: i < lives
+                  ? [Shadow(color: GameColors.pacman, blurRadius: 8)]
+                  : null,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _levelChip() {
+    final c = levelColor(_level);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: c, width: 1.5),
+      ),
+      child: Text(
+        _level.name.toUpperCase(),
+        textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 10, color: c),
+      ),
+    );
+  }
+
+  Widget _pauseButton() {
+    return GestureDetector(
+      onTap: _togglePause,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: GameColors.wallGlow.withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: GameColors.wallLine, width: 1.5),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(paused ? Icons.play_arrow : Icons.pause, size: 18),
+            const SizedBox(width: 6),
+            Text(paused ? 'RESUME' : 'PAUSE', style: const TextStyle(fontSize: 9)),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final showPad = MediaQuery.sizeOf(context).width < 800;
     return Scaffold(
-      body: SafeArea(
-        child: Focus(
-          focusNode: _focusNode,
-          autofocus: true,
-          onKeyEvent: _onKey,
-          child: Column(
-            children: [
-              _buildHeader(),
-              Expanded(child: _buildGameCanvas()),
-              if (showPad) _buildControls(),
-              const SizedBox(height: 12),
-            ],
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(0, -0.2),
+            radius: 1.2,
+            colors: [Color(0xFF111A5A), Color(0xFF05071C), Colors.black],
+          ),
+        ),
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, c) {
+              final wide = c.maxWidth > c.maxHeight * 1.2;
+              return wide ? _buildWide(c) : _buildTall();
+            },
           ),
         ),
       ),
     );
   }
 
-  Widget _buildHeader() {
-    const small = TextStyle(fontSize: 10);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('SCORE $score', style: small),
-              Text('BEST $highScore', style: small),
-            ],
+  /// Desktop / landscape: info panel | board | controls.
+  Widget _buildWide(BoxConstraints c) {
+    final panelW = (c.maxWidth * 0.22).clamp(160.0, 280.0).toDouble();
+    return Row(
+      children: [
+        SizedBox(
+          width: panelW,
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: SizedBox(width: panelW - 28, child: _sidePanel()),
+              ),
+            ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        ),
+        Expanded(child: _buildGameCanvas()),
+        SizedBox(
+          width: panelW,
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: _buildControls(62),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _sidePanel() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _glowText('PAC-MAN', 18, GameColors.pacman),
+        const SizedBox(height: 20),
+        _statCard('SCORE', '$score'),
+        const SizedBox(height: 10),
+        _statCard('BEST', '$highScore'),
+        const SizedBox(height: 10),
+        _card('LIVES', _livesRow()),
+        const SizedBox(height: 14),
+        _levelChip(),
+        const SizedBox(height: 10),
+        _pauseButton(),
+        const SizedBox(height: 16),
+        const Text(
+          'ARROWS / WASD\nSPACE = PAUSE',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 7, color: Colors.white38, height: 2),
+        ),
+      ],
+    );
+  }
+
+  /// Phone / portrait: HUD on top, board, d-pad at the bottom.
+  Widget _buildTall() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+          child: Column(
             children: [
+              _glowText('PAC-MAN', 16, GameColors.pacman),
+              const SizedBox(height: 10),
               Row(
-                children: List.generate(
-                  max(lives, 0),
-                  (_) => Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: Icon(Icons.circle, color: GameColors.pacman, size: 14),
-                  ),
-                ),
+                children: [
+                  Expanded(child: _statCard('SCORE', '$score')),
+                  const SizedBox(width: 10),
+                  Expanded(child: _statCard('BEST', '$highScore')),
+                ],
               ),
-              Text(_level.name.toUpperCase(), style: small),
-              SizedBox(
-                height: 28,
-                width: 28,
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  iconSize: 22,
-                  tooltip: paused ? 'Resume' : 'Pause',
-                  onPressed: _togglePause,
-                  icon: Icon(paused ? Icons.play_arrow : Icons.pause),
-                ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _livesRow(),
+                  _levelChip(),
+                  _pauseButton(),
+                ],
               ),
             ],
           ),
-        ],
-      ),
+        ),
+        Expanded(child: _buildGameCanvas()),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12, top: 4),
+          child: _buildControls(58),
+        ),
+      ],
     );
   }
 
@@ -753,14 +977,14 @@ class _GamePageState extends State<GamePage>
     return LayoutBuilder(
       builder: (context, constraints) {
         final tileSize = min(
-          constraints.maxWidth / cols,
-          constraints.maxHeight / rows,
-        );
+          (constraints.maxWidth - 16) / cols,
+          (constraints.maxHeight - 16) / rows,
+        ).clamp(4.0, 1000.0).toDouble();
 
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onPanUpdate: (d) {
-            if (d.delta.distance < 2) return;
+            if (d.delta.distance < 1.5) return;
             if (d.delta.dx.abs() > d.delta.dy.abs()) {
               _changeDirection(d.delta.dx > 0 ? Dir.right : Dir.left);
             } else {
@@ -768,11 +992,31 @@ class _GamePageState extends State<GamePage>
             }
           },
           child: Center(
-            child: SizedBox(
+            child: Container(
               width: tileSize * cols,
               height: tileSize * rows,
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: [
+                  BoxShadow(
+                    color: GameColors.wallGlow.withValues(alpha: 0.45),
+                    blurRadius: 28,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
               child: Stack(
                 children: [
+                  // Static maze (cached by the RepaintBoundary).
+                  Positioned.fill(
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        painter: _WallPainter(map: map, tileSize: tileSize),
+                      ),
+                    ),
+                  ),
+                  // Moving parts.
                   Positioned.fill(
                     child: CustomPaint(
                       painter: _GamePainter(
@@ -791,13 +1035,11 @@ class _GamePageState extends State<GamePage>
                   if (ready || paused)
                     Center(
                       child: Padding(
-                        padding: EdgeInsets.only(top: tileSize * 3),
-                        child: Text(
+                        padding: EdgeInsets.only(top: tileSize * 3.2),
+                        child: _glowText(
                           ready ? 'READY!' : 'PAUSED',
-                          style: TextStyle(
-                            fontSize: max(10, tileSize * 0.7),
-                            color: GameColors.pacman,
-                          ),
+                          max(10, tileSize * 0.75),
+                          GameColors.pacman,
                         ),
                       ),
                     ),
@@ -810,45 +1052,216 @@ class _GamePageState extends State<GamePage>
     );
   }
 
-  Widget _buildControls() {
+  Widget _buildControls(double s) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _controlButton(Icons.keyboard_arrow_up, Dir.up),
+        _PadButton(
+          icon: Icons.keyboard_arrow_up_rounded,
+          size: s,
+          onPressed: () => _changeDirection(Dir.up),
+        ),
+        const SizedBox(height: 8),
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _controlButton(Icons.keyboard_arrow_left, Dir.left),
-            const SizedBox(width: 48),
-            _controlButton(Icons.keyboard_arrow_right, Dir.right),
+            _PadButton(
+              icon: Icons.keyboard_arrow_left_rounded,
+              size: s,
+              onPressed: () => _changeDirection(Dir.left),
+            ),
+            SizedBox(width: s + 16),
+            _PadButton(
+              icon: Icons.keyboard_arrow_right_rounded,
+              size: s,
+              onPressed: () => _changeDirection(Dir.right),
+            ),
           ],
         ),
-        _controlButton(Icons.keyboard_arrow_down, Dir.down),
+        const SizedBox(height: 8),
+        _PadButton(
+          icon: Icons.keyboard_arrow_down_rounded,
+          size: s,
+          onPressed: () => _changeDirection(Dir.down),
+        ),
       ],
     );
   }
+}
 
-  Widget _controlButton(IconData icon, Dir dir) {
-    return InkWell(
-      onTap: () => _changeDirection(dir),
-      borderRadius: BorderRadius.circular(50),
-      child: Container(
-        margin: const EdgeInsets.all(2),
-        padding: const EdgeInsets.all(8),
+// ─────────────────────────────────────────────────────────────────────────────
+// On-screen pad button (reacts instantly on touch / click down)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PadButton extends StatefulWidget {
+  const _PadButton({
+    required this.icon,
+    required this.size,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final double size;
+  final VoidCallback onPressed;
+
+  @override
+  State<_PadButton> createState() => _PadButtonState();
+}
+
+class _PadButtonState extends State<_PadButton> {
+  bool _down = false;
+
+  void _set(bool v) {
+    if (mounted) setState(() => _down = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _down ? GameColors.pacman : GameColors.wallLine;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (_) {
+        _set(true);
+        widget.onPressed();
+      },
+      onTapUp: (_) => _set(false),
+      onTapCancel: () => _set(false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 90),
+        width: widget.size,
+        height: widget.size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: Colors.blueGrey.shade800.withValues(alpha: 0.8),
+          gradient: RadialGradient(
+            colors: _down
+                ? [Colors.yellow.shade600, Colors.orange.shade700]
+                : [const Color(0xFF2A3A9C), const Color(0xFF0C1448)],
+          ),
+          border: Border.all(color: accent, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: accent.withValues(alpha: _down ? 0.6 : 0.35),
+              blurRadius: _down ? 20 : 12,
+            ),
+          ],
         ),
-        child: Icon(icon, size: 30),
+        child: Icon(
+          widget.icon,
+          size: widget.size * 0.62,
+          color: _down ? Colors.black : Colors.white,
+        ),
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Painter
+// Painters
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Static layer: neon maze outline + ghost-house door. Only repaints when the
+/// map or tile size changes.
+class _WallPainter extends CustomPainter {
+  final List<List<int>> map;
+  final double tileSize;
+
+  _WallPainter({required this.map, required this.tileSize});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rowsN = map.length;
+    final colsN = map[0].length;
+    bool isWall(int r, int c) =>
+        r >= 0 && r < rowsN && c >= 0 && c < colsN && map[r][c] == Tile.wall;
+
+    final fill = Paint()..color = GameColors.wallFill;
+    final edges = Path();
+    final inset = tileSize * 0.12;
+
+    for (int r = 0; r < rowsN; r++) {
+      for (int c = 0; c < colsN; c++) {
+        final cell = map[r][c];
+        final left = c * tileSize;
+        final top = r * tileSize;
+        final right = left + tileSize;
+        final bottom = top + tileSize;
+
+        if (cell == Tile.door) {
+          final doorPaint = Paint()
+            ..color = GameColors.door
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = max(2, tileSize * 0.14)
+            ..strokeCap = StrokeCap.round;
+          canvas.drawLine(
+            Offset(left, top + tileSize / 2),
+            Offset(right, top + tileSize / 2),
+            doorPaint,
+          );
+          continue;
+        }
+        if (cell != Tile.wall) continue;
+
+        canvas.drawRect(
+          Rect.fromLTRB(left - 0.5, top - 0.5, right + 0.5, bottom + 0.5),
+          fill,
+        );
+
+        final up = !isWall(r - 1, c);
+        final down = !isWall(r + 1, c);
+        final lft = !isWall(r, c - 1);
+        final rgt = !isWall(r, c + 1);
+
+        if (up) {
+          edges
+            ..moveTo(left + (lft ? inset : 0), top + inset)
+            ..lineTo(right - (rgt ? inset : 0), top + inset);
+        }
+        if (down) {
+          edges
+            ..moveTo(left + (lft ? inset : 0), bottom - inset)
+            ..lineTo(right - (rgt ? inset : 0), bottom - inset);
+        }
+        if (lft) {
+          edges
+            ..moveTo(left + inset, top + (up ? inset : 0))
+            ..lineTo(left + inset, bottom - (down ? inset : 0));
+        }
+        if (rgt) {
+          edges
+            ..moveTo(right - inset, top + (up ? inset : 0))
+            ..lineTo(right - inset, bottom - (down ? inset : 0));
+        }
+      }
+    }
+
+    // Soft glow underneath, crisp line on top.
+    canvas.drawPath(
+      edges,
+      Paint()
+        ..color = GameColors.wallGlow.withValues(alpha: 0.8)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = max(3, tileSize * 0.22)
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, tileSize * 0.16),
+    );
+    canvas.drawPath(
+      edges,
+      Paint()
+        ..color = GameColors.wallLine
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = max(1.5, tileSize * 0.09)
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _WallPainter old) =>
+      old.map != map || old.tileSize != tileSize;
+}
+
+/// Dynamic layer: pellets, Pac-Man and ghosts.
 class _GamePainter extends CustomPainter {
   final List<List<int>> map;
   final Point<int> pac;
@@ -872,7 +1285,7 @@ class _GamePainter extends CustomPainter {
     required this.tickAnimation,
   }) : super(repaint: Listenable.merge([mouthAnimation, tickAnimation]));
 
-  /// Interpolated tile position (in tile units). Skips the lerp for tunnel wraps.
+  /// Interpolated tile position (in tile units). Skips the lerp on tunnel wraps.
   Offset _lerp(Point<int> from, Point<int> to) {
     if ((to.x - from.x).abs() > 1 || (to.y - from.y).abs() > 1) {
       return Offset(to.x.toDouble(), to.y.toDouble());
@@ -894,54 +1307,31 @@ class _GamePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint();
-    final wallFill = Paint()..color = GameColors.wallFill;
-    final wallStroke = Paint()
-      ..color = GameColors.wall
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = max(1.5, tileSize * 0.1);
 
-    // ── Maze ──
+    // ── Pellets ──
     for (int r = 0; r < map.length; r++) {
       for (int c = 0; c < map[r].length; c++) {
-        final rect = Rect.fromLTWH(c * tileSize, r * tileSize, tileSize, tileSize);
-        switch (map[r][c]) {
-          case Tile.wall:
-            final rr = RRect.fromRectAndRadius(
-              rect.deflate(tileSize * 0.08),
-              Radius.circular(tileSize * 0.25),
-            );
-            canvas.drawRRect(rr, wallFill);
-            canvas.drawRRect(rr, wallStroke);
-            break;
-          case Tile.pellet:
-            paint.color = GameColors.pellet;
-            canvas.drawCircle(rect.center, tileSize * 0.1, paint);
-            break;
-          case Tile.power:
-            paint.color = GameColors.pellet;
-            canvas.drawCircle(
-              rect.center,
-              tileSize * (0.24 + 0.06 * mouthAnimation.value),
-              paint,
-            );
-            break;
-          case Tile.door:
-            paint
-              ..color = GameColors.door
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = max(2, tileSize * 0.14);
-            canvas.drawLine(rect.centerLeft, rect.centerRight, paint);
-            paint.style = PaintingStyle.fill;
-            break;
-          default:
-            break;
+        final cell = map[r][c];
+        if (cell != Tile.pellet && cell != Tile.power) continue;
+        final center = Offset((c + 0.5) * tileSize, (r + 0.5) * tileSize);
+        if (cell == Tile.pellet) {
+          paint.color = GameColors.pellet;
+          canvas.drawCircle(center, tileSize * 0.1, paint);
+        } else {
+          final pulse = 0.24 + 0.06 * mouthAnimation.value;
+          paint.color = GameColors.pellet.withValues(alpha: 0.25);
+          canvas.drawCircle(center, tileSize * (pulse + 0.14), paint);
+          paint.color = GameColors.pellet;
+          canvas.drawCircle(center, tileSize * pulse, paint);
         }
       }
     }
-    paint.style = PaintingStyle.fill;
 
     // ── Pac-Man ──
-    final pacRect = _spriteRect(_lerp(prevPac, pac)).deflate(tileSize * 0.08);
+    final pacTile = _lerp(prevPac, pac);
+    final pacRect = _spriteRect(pacTile).deflate(tileSize * 0.08);
+    paint.color = GameColors.pacman.withValues(alpha: 0.22);
+    canvas.drawCircle(pacRect.center, tileSize * 0.75, paint);
     paint.color = GameColors.pacman;
 
     final mouth = (pi / 4) * (1 - mouthAnimation.value);
@@ -975,8 +1365,11 @@ class _GamePainter extends CustomPainter {
     final flash = frightened && frightenedTicks <= 10 && frightenedTicks.isEven;
 
     if (!g.eaten) {
-      paint.color =
+      final body =
           frightened ? (flash ? Colors.white : GameColors.frightened) : g.color;
+      paint.color = body.withValues(alpha: 0.2);
+      canvas.drawCircle(gr.center, tileSize * 0.7, paint);
+      paint.color = body;
       canvas.drawPath(_ghostBody(gr), paint);
     }
 
